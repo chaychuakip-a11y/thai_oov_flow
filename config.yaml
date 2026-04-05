@@ -1,23 +1,27 @@
 global:
-  input_root: "all_corpus_0327"
-  output_root: "update_0330"
-  dict_root: "dicts"
+  input_root: "all_corpus_0410" # 每次更新只需修改此处的日期，脚本会自动创建该目录
+  output_root: "update_0410"
   script_dir: "scripts"
+  dict_root: "dicts"
 
 tasks:
-  gongban:
-    base_dict: "gongban_base_dict.checked"
-    master_memory: "gongban_master_memory.pkl"
-    tts_tool_path: "pred_tool_gongban/bin_predict"
   music:
     base_dict: "music_base_dict.checked"
     master_memory: "music_master_memory.pkl"
     tts_tool_path: "pred_tool_music/bin_predict"
+    raw_source_dir: "/home/user/downloads/raw_music_data" # 新增：该任务未整理的原始语料根目录
+  gongban:
+    base_dict: "gongban_base_dict.checked"
+    master_memory: "gongban_master_memory.pkl"
+    tts_tool_path: "pred_tool_gongban/bin_predict"
+    raw_source_dir: "/home/user/downloads/raw_gongban_data" # 新增
   poi:
     base_dict: "poi_base_dict.checked"
     master_memory: "poi_master_memory.pkl"
     tts_tool_path: "pred_tool_poi/bin_predict"
+    raw_source_dir: "/home/user/downloads/raw_poi_data" # 新增
   weather:
     base_dict: "weather_base_dict.checked"
     master_memory: "weather_master_memory.pkl"
     tts_tool_path: "pred_tool_weather/bin_predict"
+    raw_source_dir: "/home/user/downloads/raw_gongban_data" # 新增

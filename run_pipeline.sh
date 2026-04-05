@@ -1,66 +1,94 @@
 #!/bin/bash
+
+# 开启严格模式：任何命令失败或管道故障即刻终止 Pipeline
 set -e
 set -o pipefail
 
-task_name=$1
-force_init=$2
+TASK_NAME=$1
+FORCE_INIT=$2
 
-if [ -z "$task_name" ]; then
-    echo "error: task_name is required."
+if [ -z "$TASK_NAME" ]; then
+    echo "Usage: bash run_pipeline.sh <task_name> [--force-init]"
     exit 1
 fi
 
+# 获取当前项目的绝对根目录
+ROOT_DIR=$(pwd)
+
+# 1. 解析 YAML 配置并注入环境变量
+# 得到 NEW_XLSX_DIR, OUT_DIR, BASE_DICT, MASTER_MEMORY, TTS_TOOL_PATH 等
+eval $(python scripts/parse_config.py $TASK_NAME)
+
+# 2. 基础环境加载
 source /home3/asrdictt/yjchen221/.bashrc_1
 conda activate cdx
 
-new_xlsx_dir="all_corpus_0327/${task_name}"
-out_dir="update_0330/${task_name}"
-base_dict="./dicts/${task_name}_base_dict.checked"
-master_memory="./dicts/${task_name}_master_memory.pkl"
-script_dir=$(cd "$(dirname "$0")" && pwd)
-
-# 处理强制初始化逻辑
-if [ "$force_init" == "--force-init" ]; then
-    echo "[Notice] Force init triggered. Clearing old memory for ${task_name}..."
-    if [ -f "$master_memory" ]; then
-        backup_name="${master_memory}.bak_$(date +%Y%m%d%H%M%S)"
-        mv "$master_memory" "$backup_name"
-        echo "[Notice] Old memory backed up to: $backup_name"
-    fi
+# 3. 处理 Force Init 逻辑 (备份 Master Memory)
+if [ "$FORCE_INIT" == "--force-init" ] && [ -f "$MASTER_MEMORY" ]; then
+    BAK="${MASTER_MEMORY}.bak_$(date +%Y%m%d%H%M%S)"
+    mv "$MASTER_MEMORY" "$BAK"
+    echo "[Notice] Force init triggered. Old memory backed up to: $BAK"
 fi
 
-mkdir -p ${out_dir}/logs ${out_dir}/crops_res ${out_dir}/temp_pkl ${out_dir}/xlsx
+# 创建必要的输出和日志目录
+mkdir -p ${OUT_DIR}/logs ${OUT_DIR}/crops_res ${OUT_DIR}/temp_pkl ${OUT_DIR}/xlsx
 
-echo "[step 1] extract oovs for ${task_name}..."
-python scripts/0_extract_and_format_crops_v2.py ${new_xlsx_dir} ${out_dir}/crops_res ${master_memory} > ${out_dir}/logs/step1_extract.log
+# --- Pipeline 开始 ---
 
-echo "[step 2] parallel tts prediction for ${task_name}..."
+# [Step 1] 提取增量 OOV 词条
+echo "[Step 1] Extracting OOVs for ${TASK_NAME}..."
+python ${SCRIPT_DIR}/0_extract_and_format_crops_v2.py \
+    ${NEW_XLSX_DIR} \
+    ${OUT_DIR}/crops_res \
+    ${MASTER_MEMORY} > ${OUT_DIR}/logs/step1_extract.log
+
+# [Step 2] Serial TTS prediction (Stable version)
+echo "[Step 2] Serial TTS prediction for ${TASK_NAME}..."
 (
-    source /work2/asrdictt/wwyang9/asr_training/11_txt_fuzhu_whisper_hulk/hulk.bashrc
-    export TTSKNL_DOMAIN=. OMP_NUM_THREADS=1 LD_LIBRARY_PATH=.
-    cd pred_tool_gongban/bin_predict
+    source /work2/asrdictt/wwyang9/asr_training/11_txt_fuzhu_whisper_hulk/hulk.bashrc 2>/dev/null || true
     
-    max_jobs=8
-    jobs_count=0
+    export TTSKNL_DOMAIN=. 
+    export OMP_NUM_THREADS=1 
+    export LD_LIBRARY_PATH=.
     
-    for txt_in in ${script_dir}/${out_dir}/crops_res/*.desplit; do
+    BIN_DIR="${ROOT_DIR}/${TTS_TOOL_PATH}"
+    cd "${BIN_DIR}"
+    
+    shopt -s nullglob
+    for txt_in in "${ROOT_DIR}/${OUT_DIR}/crops_res/"*.desplit; do
         if [ -f "$txt_in" ] && [ ! -f "${txt_in}.tts_out" ]; then
-            (
-                ./ttsSample -l libttsknl.so -x 1 -i "$txt_in" -m 1 -f 1 -g 1 -z 1 -o wav -v 69400 > "${txt_in}.run.log" 2>&1
-                [ -f "frontinfo.txt" ] && mv frontinfo.txt "${txt_in}.tts_out"
-            ) &
-            ((jobs_count++))
-            if ((jobs_count >= max_jobs)); then
-                wait -n
-                ((jobs_count--))
+            
+            # 清理上一次可能残留的文件，防止干扰
+            rm -f frontinfo.txt run.log
+            
+            # 直接在原始目录下串行执行
+            ./ttsSample -l libttsknl.so -x 1 -i "$txt_in" -m 1 -f 1 -g 1 -z 1 -o wav -v 69400 > run.log 2>&1
+            
+            # 及时转移结果
+            if [ -f "frontinfo.txt" ]; then
+                mv frontinfo.txt "${txt_in}.tts_out"
+            else
+                echo "[Error] Execution failed for $txt_in" >&2
+                cat run.log > "${txt_in}.error_log"
             fi
         fi
     done
-    wait
-) > ${out_dir}/logs/step2_tts.log
+    echo "[Log] Step 2 finished."
+) > "${OUT_DIR}/logs/step2_tts.log" 2>&1
 
-echo "[step 3] process dicts for ${task_name}..."
-python scripts/unified_dict_processor.py --crops_dir ${out_dir}/crops_res --base_dict ${base_dict} > ${out_dir}/logs/step3_postprocess.log
+# [Step 3] 词典后处理与校验
+echo "[Step 3] Processing dicts for ${TASK_NAME}..."
+python ${SCRIPT_DIR}/unified_dict_processor.py \
+    --crops_dir ${OUT_DIR}/crops_res \
+    --base_dict ${BASE_DICT} > ${OUT_DIR}/logs/step3_postprocess.log
 
-echo "[step 4] remake excel and update memory for ${task_name}..."
-python scripts/8_remake_xlsx_v2.py ${out_dir}/temp_pkl ${out_dir}/crops_res ${new_xlsx_dir} ${out_dir}/xlsx ${master_memory} > ${out_dir}/logs/step4_remake.log
+# [Step 4] 1:1 重构 Excel 并合入 Memory
+echo "[Step 4] Remaking Excel and updating memory for ${TASK_NAME}..."
+python ${SCRIPT_DIR}/8_remake_xlsx_v2.py \
+    ${OUT_DIR}/temp_pkl \
+    ${OUT_DIR}/crops_res \
+    ${NEW_XLSX_DIR} \
+    ${OUT_DIR}/xlsx \
+    ${MASTER_MEMORY} > ${OUT_DIR}/logs/step4_remake.log
+
+echo "Pipeline finished for ${TASK_NAME}. Results: ${OUT_DIR}/xlsx/"
