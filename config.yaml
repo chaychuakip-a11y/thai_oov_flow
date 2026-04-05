@@ -1,0 +1,23 @@
+global:
+  input_root: "all_corpus_0327"
+  output_root: "update_0330"
+  dict_root: "dicts"
+  script_dir: "scripts"
+
+tasks:
+  gongban:
+    base_dict: "gongban_base_dict.checked"
+    master_memory: "gongban_master_memory.pkl"
+    tts_tool_path: "pred_tool_gongban/bin_predict"
+  music:
+    base_dict: "music_base_dict.checked"
+    master_memory: "music_master_memory.pkl"
+    tts_tool_path: "pred_tool_music/bin_predict"
+  poi:
+    base_dict: "poi_base_dict.checked"
+    master_memory: "poi_master_memory.pkl"
+    tts_tool_path: "pred_tool_poi/bin_predict"
+  weather:
+    base_dict: "weather_base_dict.checked"
+    master_memory: "weather_master_memory.pkl"
+    tts_tool_path: "pred_tool_weather/bin_predict"

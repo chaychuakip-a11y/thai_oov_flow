@@ -1,0 +1,22 @@
+# python bytecode
+__pycache__/
+*.py[cod]
+
+# storage (master memory & pkls)
+# 记忆文件属于本地状态，不建议上传，除非你想共享基准映射
+dicts/*.pkl
+dicts/*.checked.bak*
+
+# corpus & results (large data)
+# 原始语料和输出结果通常非常大，禁止上传
+all_corpus_*/
+update_*/
+
+# tts tools & binaries
+# 外部推理工具和库文件
+pred_tool_*/
+
+# logs & temporary files
+*.log
+nohup.out
+.vscode/
